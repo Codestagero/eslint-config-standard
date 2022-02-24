@@ -33,13 +33,6 @@ module.exports = {
         "brace-style": [
           "error"
         ],
-        "sort-imports": ["error", {
-            "ignoreCase": false,
-            "ignoreDeclarationSort": false,
-            "ignoreMemberSort": false,
-            "memberSyntaxSortOrder": ["none", "all", "multiple", "single"],
-            "allowSeparatedGroups": false
-        }],
         "no-underscore-dangle": "off",
         "quote-props": [
           "error",
