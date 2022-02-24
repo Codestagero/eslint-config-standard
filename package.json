@@ -1,0 +1,17 @@
+{
+  "name": "@codestage/eslint-config-standard",
+  "version": "1.0.0",
+  "description": "Standard ESLint configuration.",
+  "main": "index.js",
+  "scripts": {
+  },
+  "author": "S.C. Codestage S.R.L",
+  "license": "ISC",
+  "peerDependencies": {
+    "eslint": ">=8"
+  },
+  "dependencies": {
+    "@typescript-eslint/eslint-plugin": "5.3.0",
+    "@typescript-eslint/parser": "5.3.0"
+  }
+}
