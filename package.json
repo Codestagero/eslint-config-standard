@@ -1,6 +1,6 @@
 {
   "name": "@codestage/eslint-config-standard",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Standard ESLint configuration.",
   "main": "index.js",
   "scripts": {
