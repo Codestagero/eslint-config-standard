@@ -42,7 +42,6 @@ module.exports = {
         "semi": ["error", "always"],
         "arrow-body-style": ["error", "as-needed"],
         "eqeqeq": "error",
-        "dot-notation": "error",
         "capitalized-comments": ["error"],
         "curly": "error",
         "no-lonely-if": "error",
