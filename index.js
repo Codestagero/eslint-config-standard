@@ -28,9 +28,6 @@ module.exports = {
         "arrow-parens": [
             "error",
             "as-needed",
-            {
-                "requireForBlockBody": true
-            }
         ],
         "brace-style": [
             "error"
