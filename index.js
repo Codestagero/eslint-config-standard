@@ -40,7 +40,7 @@ module.exports = {
             "single"
         ],
         "semi": ["error", "always"],
-        "arrow-body-style": ["error", "always"],
+        "arrow-body-style": ["error", "as-needed"],
         "eqeqeq": "error",
         "dot-notation": "error",
         "capitalized-comments": ["error"],
