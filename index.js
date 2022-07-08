@@ -17,9 +17,7 @@ module.exports = {
             }
         }],
         "no-restricted-imports": ["error", {
-            "ignorePatterns": ['*.spec.ts'],
-            "patterns": [".*"],
-
+            "patterns": [".*", "!*.spec.ts"]
         }],
         "@typescript-eslint/explicit-member-accessibility": ["error", {
             "accessibility": "no-public"
@@ -40,7 +38,21 @@ module.exports = {
         "quotes": [
             "error",
             "single"
-        ]
+        ],
+        "semi": ["error", "always"],
+        "arrow-body-style": ["error", "always"],
+        "eqeqeq": "error",
+        "dot-notation": "error",
+        "capitalized-comments": ["error"],
+        "curly": "error",
+        "no-lonely-if": "error",
+        "no-redeclare": "error",
+        "no-unneeded-ternary": "error",
+        "no-var": "error",
+        "prefer-const": "error",
+        "prefer-exponentiation-operator": "error",
+        "yoda": "error",
+        "spaced-comment": ["error", "always"]
     }
 
 };
