@@ -43,6 +43,7 @@ jobs:
           path = Path('tools/collect_phase46_market_data.py')
           text = path.read_text()
           text = text.replace('gzip.open(path, "wt", encoding="utf-8", newline="", mtime=0)', 'gzip.open(path, "wt", encoding="utf-8", newline="")')
+          text = text.replace('except ApiError:\n                raise', 'except ApiError as exc:\n                last = str(exc)\n                break')
           path.write_text(text)
           PY
           python -m py_compile tools/collect_phase46_market_data.py
