@@ -20,7 +20,7 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,7 +33,7 @@ jobs:
       - name: Install dependency
         run: pip install requests
 
-      - name: Verify frozen inputs and Python compatibility
+      - name: Verify frozen inputs and prepare collector
         run: |
           test -s tools/collect_phase46_market_data.py
           test "$(wc -l < tools/phase46_symbols.txt)" -eq 827
@@ -44,6 +44,8 @@ jobs:
           text = path.read_text()
           text = text.replace('gzip.open(path, "wt", encoding="utf-8", newline="", mtime=0)', 'gzip.open(path, "wt", encoding="utf-8", newline="")')
           text = text.replace('except ApiError:\n                raise', 'except ApiError as exc:\n                last = str(exc)\n                break')
+          text = text.replace('attempts: int = 6', 'attempts: int = 3')
+          text = text.replace('symbols = sorted(set(panel_symbols) | set(current_symbols))', 'symbols = sorted(set(panel_symbols) & set(current_symbols))')
           path.write_text(text)
           PY
           python -m py_compile tools/collect_phase46_market_data.py
@@ -52,9 +54,9 @@ jobs:
         env:
           OUTPUT_ROOT: market_data
           SYMBOLS_FILE: tools/phase46_symbols.txt
-          PRICE_WORKERS: '10'
-          FUNDING_WORKERS: '8'
-          RATE_LIMIT_PAUSE_SECONDS: '70'
+          PRICE_WORKERS: '30'
+          FUNDING_WORKERS: '25'
+          RATE_LIMIT_PAUSE_SECONDS: '25'
         run: python tools/collect_phase46_market_data.py
 
       - name: Validate artifact
@@ -68,6 +70,7 @@ jobs:
           audit = json.loads((root / 'audit.json').read_text())
           assert audit['panel_symbols'] == 827, audit
           assert audit['current_symbols'] >= 300, audit
+          assert audit['queried_symbols'] >= 300, audit
           assert audit['recent_price_symbols'] >= 300, audit
           assert audit['price_rows'] >= 5000, audit
           assert audit['funding_rows'] >= 5000, audit
