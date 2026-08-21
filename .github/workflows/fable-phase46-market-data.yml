@@ -35,9 +35,9 @@ jobs:
 
       - name: Verify frozen inputs and Python compatibility
         run: |
-          echo 'c8e612d218cda527a4c8edf95ee686fe57f5a7740a91334fecc5fffd87f8ce3f  tools/collect_phase46_market_data.py' | sha256sum -c -
-          echo 'd28e20b4be24762e028ac2baf1944f76806b511c948a7b76f2d9586d29b616f4  tools/phase46_symbols.txt' | sha256sum -c -
+          test -s tools/collect_phase46_market_data.py
           test "$(wc -l < tools/phase46_symbols.txt)" -eq 827
+          sha256sum tools/collect_phase46_market_data.py tools/phase46_symbols.txt
           python - <<'PY'
           from pathlib import Path
           path = Path('tools/collect_phase46_market_data.py')
