@@ -1,0 +1,15 @@
+# Temporary V18 CBOE links
+
+- [UZF](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZF.json)
+- [UZG](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZG.json)
+- [UZH](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZH.json)
+- [UZJ](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZJ.json)
+- [UZK](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZK.json)
+- [UZM](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZM.json)
+- [UZN](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZN.json)
+- [UZQ](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZQ.json)
+- [UZU](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZU.json)
+- [UZV](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZV.json)
+- [UZX](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZX.json)
+- [UZZ](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/UZZ.json)
+- [VIX](https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_VIX.json)
