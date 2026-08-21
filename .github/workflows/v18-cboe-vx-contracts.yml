@@ -1,0 +1,145 @@
+name: v18-cboe-vx-contracts
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/v18-cboe-vx-contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download official monthly VX contract files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+          import calendar
+          import csv
+          import hashlib
+          import json
+          import time
+          from datetime import date, timedelta
+          from pathlib import Path
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          out = Path('v18_cboe_vx_contracts')
+          out.mkdir(parents=True, exist_ok=True)
+          base = 'https://cdn.cboe.com/data/us/futures/market_statistics/historical_data/VX'
+
+          def third_friday(year: int, month: int) -> date:
+              cal = calendar.monthcalendar(year, month)
+              fridays = [week[calendar.FRIDAY] for week in cal if week[calendar.FRIDAY]]
+              return date(year, month, fridays[2])
+
+          def expected_vx_expiry(year: int, month: int) -> date:
+              ny, nm = (year + 1, 1) if month == 12 else (year, month + 1)
+              return third_friday(ny, nm) - timedelta(days=30)
+
+          def candidates(d: date):
+              # Regular date first, then holiday-adjustment neighbors.
+              seen = set()
+              for offset in (0, -1, 1, -2, 2):
+                  x = d + timedelta(days=offset)
+                  if x.weekday() < 5 and x not in seen:
+                      seen.add(x)
+                      yield x
+
+          records = []
+          missing = []
+          for year in range(2013, 2028):
+              for month in range(1, 13):
+                  # Contracts beyond Mar-2027 were not needed for the 2026-08 evaluation.
+                  if year == 2027 and month > 3:
+                      continue
+                  expected = expected_vx_expiry(year, month)
+                  success = None
+                  errors = []
+                  for expiry in candidates(expected):
+                      url = f'{base}/VX_{expiry.isoformat()}.csv'
+                      req = Request(url, headers={'User-Agent': 'Mozilla/5.0 V18 research; low-rate official historical download'})
+                      try:
+                          with urlopen(req, timeout=30) as response:
+                              payload = response.read()
+                          text = payload.decode('utf-8-sig', errors='replace')
+                          rows = list(csv.reader(text.splitlines()))
+                          if len(rows) < 3:
+                              errors.append({'url': url, 'error': 'too_few_rows'})
+                              continue
+                          filename = out / f'VX_{year}{month:02d}_{expiry.isoformat()}.csv'
+                          filename.write_bytes(payload)
+                          success = {
+                              'contract_year': year,
+                              'contract_month': month,
+                              'expected_expiry': expected.isoformat(),
+                              'resolved_expiry': expiry.isoformat(),
+                              'url': url,
+                              'file': filename.name,
+                              'bytes': len(payload),
+                              'rows': len(rows) - 1,
+                              'sha256': hashlib.sha256(payload).hexdigest(),
+                          }
+                          break
+                      except (HTTPError, URLError, TimeoutError) as exc:
+                          errors.append({'url': url, 'error': type(exc).__name__, 'detail': str(exc)[:200]})
+                      time.sleep(0.12)
+                  if success:
+                      records.append(success)
+                  else:
+                      missing.append({
+                          'contract_year': year,
+                          'contract_month': month,
+                          'expected_expiry': expected.isoformat(),
+                          'errors': errors,
+                      })
+                  time.sleep(0.12)
+
+          (out / 'contracts_manifest.json').write_text(json.dumps(records, indent=2))
+          (out / 'missing_contracts.json').write_text(json.dumps(missing, indent=2))
+          summary = {
+              'source': 'Cboe official historical VX contract CSV files',
+              'source_pattern': base + '/VX_YYYY-MM-DD.csv',
+              'contracts_downloaded': len(records),
+              'contracts_missing': len(missing),
+              'first_contract': records[0] if records else None,
+              'last_contract': records[-1] if records else None,
+          }
+          (out / 'SUMMARY.json').write_text(json.dumps(summary, indent=2))
+          print(json.dumps(summary, indent=2))
+          # Require full coverage from Jan-2018 through Oct-2026, which is sufficient
+          # for front/second/third-month curves through the 2026-08 evaluation endpoint.
+          required = {(y, m) for y in range(2018, 2027) for m in range(1, 13)}
+          required -= {(2026, m) for m in range(11, 13)}
+          got = {(r['contract_year'], r['contract_month']) for r in records}
+          absent = sorted(required - got)
+          if absent:
+              raise SystemExit(f'Missing required contracts: {absent}')
+          PY
+
+      - name: Build integrity manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          find v18_cboe_vx_contracts -type f -print0 | sort -z | xargs -0 sha256sum > v18_cboe_vx_contracts/MANIFEST.sha256
+
+      - name: Upload contract archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: v18-cboe-vx-contracts
+          path: v18_cboe_vx_contracts
+          retention-days: 7
+          if-no-files-found: error
