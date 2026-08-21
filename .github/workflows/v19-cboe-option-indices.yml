@@ -1,0 +1,133 @@
+name: v19-cboe-option-indices
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/v19-cboe-option-indices.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temporary-v19-options-index-data-20260821
+
+      - name: Download official Cboe option-strategy index histories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p v19_cboe_option_indices
+          cat > /tmp/symbols.txt <<'EOF'
+          SPX
+          SPXTR
+          BXM
+          BXMC
+          BXMD
+          BXMH
+          BXMW
+          BXY
+          BXMVM
+          BXMU
+          PUT
+          PUTW
+          PUTY
+          PUTM
+          PUTVM
+          PUTD
+          PWT
+          PPUT
+          PPUT1M
+          PPUT3M
+          CLL
+          CLL1M
+          CLL3M
+          CLLZ
+          CLLR
+          CMBO
+          CNDR
+          BFLY
+          BFLY4
+          RXM
+          BXR
+          BXRH
+          BXRT
+          PUTR
+          BXN
+          BXD
+          BXDE
+          BXDEH
+          VPDSM
+          VPD
+          SPRO
+          SPRS
+          SPDCC
+          SPDVDCC
+          CALD
+          BXESG
+          BFLY5
+          BFLY6
+          BFLY7
+          BFLY8
+          EOF
+
+          : > v19_cboe_option_indices/DOWNLOAD_STATUS.csv
+          echo 'symbol,http_code,bytes,valid_csv' >> v19_cboe_option_indices/DOWNLOAD_STATUS.csv
+          while read -r symbol; do
+            [ -z "$symbol" ] && continue
+            url="https://cdn.cboe.com/api/global/us_indices/daily_prices/${symbol}_History.csv"
+            tmp="v19_cboe_option_indices/${symbol}_History.csv.tmp"
+            code=$(curl -L --retry 4 --retry-all-errors --connect-timeout 20 --max-time 120 -sS -w '%{http_code}' -o "$tmp" "$url" || true)
+            bytes=0
+            [ -f "$tmp" ] && bytes=$(wc -c < "$tmp")
+            valid=0
+            if [ "$code" = '200' ] && [ "$bytes" -gt 100 ]; then
+              if head -n 8 "$tmp" | grep -Eqi 'date|DATE'; then
+                valid=1
+                mv "$tmp" "v19_cboe_option_indices/${symbol}_History.csv"
+              fi
+            fi
+            rm -f "$tmp"
+            echo "$symbol,$code,$bytes,$valid" >> v19_cboe_option_indices/DOWNLOAD_STATUS.csv
+          done < /tmp/symbols.txt
+
+          python - <<'PY'
+          from pathlib import Path
+          import csv, json
+          root = Path('v19_cboe_option_indices')
+          summary = {}
+          for p in sorted(root.glob('*_History.csv')):
+              lines = p.read_text(errors='replace').splitlines()
+              summary[p.stem.replace('_History','')] = {
+                  'bytes': p.stat().st_size,
+                  'line_count': len(lines),
+                  'first_lines': lines[:6],
+                  'last_lines': lines[-3:],
+              }
+          if len(summary) < 8:
+              raise SystemExit(f'Only {len(summary)} valid histories downloaded')
+          (root/'SUMMARY.json').write_text(json.dumps(summary, indent=2))
+          print('valid histories', len(summary), sorted(summary))
+          PY
+
+          sha256sum v19_cboe_option_indices/* > v19_cboe_option_indices/MANIFEST.sha256
+          cat > v19_cboe_option_indices/SOURCE.txt <<'EOF'
+          source=Cboe Global Indices official daily history CSVs
+          base_url=https://cdn.cboe.com/api/global/us_indices/daily_prices/{SYMBOL}_History.csv
+          extraction_date=2026-08-21
+          purpose=V19 research-only options-convexity checkpoint
+          EOF
+
+      - name: Upload frozen option-index histories
+        uses: actions/upload-artifact@v4
+        with:
+          name: v19-cboe-option-indices
+          path: v19_cboe_option_indices
+          retention-days: 7
+          if-no-files-found: error
