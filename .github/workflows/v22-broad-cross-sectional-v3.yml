@@ -1,0 +1,113 @@
+name: v22-broad-cross-sectional-v3
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/v22-broad-cross-sectional-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+        with:
+          ref: temporary-v22-broad-cross-sectional-20260823
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy pandas scipy scikit-learn
+
+      - name: Restore final frozen V22 broad runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64, gzip, hashlib
+
+          lines = Path('.github/workflows/v22-broad-cross-sectional.yml').read_text().splitlines()
+          start = lines.index("          base64 -d > /tmp/v22_broad.py.gz <<'V22_BROAD_GZIP_BASE64'") + 1
+          end = lines.index('          V22_BROAD_GZIP_BASE64')
+          source = gzip.decompress(base64.b64decode(''.join(x.strip() for x in lines[start:end]))).decode()
+
+          old_corr = """                corr = hist[names_good].corr(min_periods=80).fillna(0.0).clip(-1.0, 1.0)\n                np.fill_diagonal(corr.values, 1.0)\n                dist = (1.0 - corr).clip(0.0, 2.0)"""
+          new_corr = """                corr = hist[names_good].corr(min_periods=80).fillna(0.0).clip(-1.0, 1.0)\n                corr_arr = corr.to_numpy(copy=True)\n                np.fill_diagonal(corr_arr, 1.0)\n                corr = pd.DataFrame(corr_arr, index=corr.index, columns=corr.columns)\n                dist = (1.0 - corr).clip(0.0, 2.0)"""
+          assert source.count(old_corr) == 1
+          source = source.replace(old_corr, new_corr)
+
+          audit_start = source.index('        # Ex-ante neutrality and activity audits at target entry.\n')
+          audit_end = source.index('        grid_rows.append(row)\n', audit_start)
+          replacement = """        # Ex-ante neutrality and activity audits, isolated by information period.\n        beta_daily = beta.reindex(dates).ffill()\n        for prefix, a, b in [\n            (\"selection_2023\", SEL_START, SEL_END),\n            (\"confirmation_2024\", CONF_START, CONF_END),\n        ]:\n            ex_beta = []\n            ex_net = []\n            active_entries = []\n            for ed, tw in target_entry.items():\n                if ed < a or ed > b or tw.empty:\n                    continue\n                bvec = beta_daily.loc[ed, tw.index].fillna(0.0)\n                ex_beta.append(abs(float((tw * bvec).sum())))\n                ex_net.append(abs(float(tw.sum())))\n                if float(tw.abs().sum()) > 0.05:\n                    active_entries.append(ed)\n            row[f\"{prefix}_avg_abs_exante_beta\"] = float(np.mean(ex_beta)) if ex_beta else 0.0\n            row[f\"{prefix}_avg_abs_net\"] = float(np.mean(ex_net)) if ex_net else 0.0\n            if prefix == \"selection_2023\":\n                active_series = pd.Series(1.0, index=pd.DatetimeIndex(active_entries), dtype=float) if active_entries else pd.Series(dtype=float)\n                qcounts = active_series.groupby(active_series.index.to_period(\"Q\")).sum() if len(active_series) else pd.Series(dtype=float)\n                relevant_q = pd.period_range(\"2023Q1\", \"2023Q4\", freq=\"Q\")\n                row[\"selection_2023_min_active_weeks_quarter\"] = float(qcounts.reindex(relevant_q, fill_value=0).min()) if len(relevant_q) else 0.0\n"""
+          source = source[:audit_start] + replacement + source[audit_end:]
+          source = source.replace('(grid["avg_abs_exante_beta"] <= 0.05)', '(grid["selection_2023_avg_abs_exante_beta"] <= 0.05)')
+          source = source.replace('(grid["avg_abs_net"] <= 0.02)', '(grid["selection_2023_avg_abs_net"] <= 0.02)')
+          source = source.replace('(grid["min_active_weeks_quarter"] >= 8)', '(grid["selection_2023_min_active_weeks_quarter"] >= 8)')
+          source = source.replace('and selected_row["avg_abs_exante_beta"] <= 0.07', 'and selected_row["confirmation_2024_avg_abs_exante_beta"] <= 0.07')
+
+          target = Path('v22_broad.py')
+          target.write_text(source)
+          digest = hashlib.sha256(target.read_bytes()).hexdigest()
+          assert digest == '706294da9f22a72c6712fe9c98053ab90a6687bf83fa94cf2f4ac65b7738d917', digest
+          PY
+          python -m py_compile v22_broad.py
+          sha256sum v22_broad.py
+
+      - name: Fetch immutable public sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/zjplab/US-Trading-Data.git price-data
+          curl --fail --location --retry 5 --retry-all-errors \
+            https://raw.githubusercontent.com/chinobing/historical_sp500_constituents/main/sp_500_historical_components.csv \
+            -o sp_500_historical_components.csv
+          git -C price-data rev-parse HEAD > PRICE_SOURCE_COMMIT.txt
+          sha256sum sp_500_historical_components.csv > MEMBERSHIP_SHA256.txt
+
+      - name: Run V22 broad engine
+        shell: bash
+        env:
+          PYTHONUNBUFFERED: '1'
+          OMP_NUM_THREADS: '2'
+          OPENBLAS_NUM_THREADS: '2'
+          MKL_NUM_THREADS: '2'
+        run: |
+          set -euo pipefail
+          python v22_broad.py \
+            --price-root price-data \
+            --membership sp_500_historical_components.csv \
+            --out v22_broad_results 2>&1 | tee v22_broad_run.log
+          test -f v22_broad_results/BROAD_STATUS.json
+
+      - name: Persist source and runtime audit
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p v22_broad_results
+          cp v22_broad.py v22_broad_results/
+          cp PRICE_SOURCE_COMMIT.txt MEMBERSHIP_SHA256.txt v22_broad_results/ || true
+          { python -V; python -m pip freeze; } > v22_broad_results/runtime.txt
+          sha256sum v22_broad_results/* > v22_broad_results/MANIFEST.sha256 || true
+
+      - name: Upload V22 broad artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v22-broad-cross-sectional-results-v3
+          path: |
+            v22_broad_results
+            v22_broad_run.log
+          retention-days: 7
+          if-no-files-found: error
