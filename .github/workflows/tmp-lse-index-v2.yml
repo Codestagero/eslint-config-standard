@@ -1,0 +1,92 @@
+name: Temporary LSE index data v2
+on:
+  push:
+    branches: [tmp-ger40-data]
+    paths: ['.github/workflows/tmp-lse-index-v2.yml']
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install cryptography requests numpy pandas pyarrow lse-data
+      - name: Ephemeral key
+        run: |
+          mkdir -p public-v2 market-data validation-data
+          python - <<'PY'
+          import os,pathlib
+          from cryptography.hazmat.primitives.asymmetric import rsa
+          from cryptography.hazmat.primitives import serialization
+          k=rsa.generate_private_key(public_exponent=65537,key_size=3072)
+          p=pathlib.Path(os.environ['RUNNER_TEMP'])/'lse-v2.pem'
+          p.write_bytes(k.private_bytes(serialization.Encoding.PEM,serialization.PrivateFormat.PKCS8,serialization.NoEncryption()));p.chmod(0o600)
+          pathlib.Path('public-v2/public.pem').write_bytes(k.public_key().public_bytes(serialization.Encoding.PEM,serialization.PublicFormat.SubjectPublicKeyInfo))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lse-public-v2
+          path: public-v2
+          retention-days: 1
+      - name: Read-only candle retrieval
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          cat > "$RUNNER_TEMP/lse_auth2.py" <<'PY'
+          import os,time,base64,json,pathlib,requests
+          from cryptography.hazmat.primitives import serialization,hashes
+          from cryptography.hazmat.primitives.asymmetric import padding
+          def read_repo(path,wait=1500):
+              until=time.monotonic()+wait
+              while time.monotonic()<until:
+                  r=requests.get('https://api.github.com/repos/'+os.environ['GITHUB_REPOSITORY']+'/contents/'+path,params={'ref':'tmp-ger40-data'},headers={'Authorization':'Bearer '+os.environ['GH_READ_TOKEN']},timeout=30)
+                  if r.status_code==200:return base64.b64decode(r.json()['content'])
+                  if r.status_code!=404:r.raise_for_status()
+                  time.sleep(6)
+              raise TimeoutError('Research input wait expired')
+          def load_key():
+              enc=json.loads(read_repo('tmp-lse/sealed-v2.json'))
+              k=serialization.load_pem_private_key((pathlib.Path(os.environ['RUNNER_TEMP'])/'lse-v2.pem').read_bytes(),password=None)
+              v=k.decrypt(base64.b64decode(enc['ciphertext']),padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None)).decode()
+              print('::add-mask::'+v,flush=True);return v
+          PY
+          PYTHONPATH="$RUNNER_TEMP" python -u - <<'PY'
+          from lse_auth2 import read_repo,load_key
+          import os,pathlib
+          code=read_repo('tmp-lse/download.py').decode().replace("dates.astype('int64')//1000000 if dates.dtype.unit=='ns' else dates.as_unit('ms').astype('int64')","dates.astype('datetime64[ns, UTC]').astype('int64')//1000000")
+          pathlib.Path('market-data/download.py').write_text(code)
+          os.environ['LSE_API_KEY']=load_key();exec(compile(code,'download.py','exec'),{'__name__':'__main__'})
+          assert len(list(pathlib.Path('market-data').glob('*_1m.parquet')))>0,'No history retrieved'
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lse-all-indices-m1
+          path: market-data
+          retention-days: 1
+          compression-level: 0
+      - name: Targeted tick validation plan
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+        run: |
+          PYTHONPATH="$RUNNER_TEMP" python -u - <<'PY'
+          from lse_auth2 import read_repo,load_key
+          import os,pathlib
+          code=read_repo('tmp-lse/validate_download.py',wait=2100)
+          pathlib.Path('validation-data/download.py').write_bytes(code)
+          os.environ['LSE_API_KEY']=load_key();exec(compile(code,'validate_download.py','exec'),{'__name__':'__main__'})
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lse-index-validation
+          path: validation-data
+          retention-days: 1
+          compression-level: 0
+      - name: Remove ephemeral key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/lse-v2.pem" "$RUNNER_TEMP/lse_auth2.py"
