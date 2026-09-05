@@ -1,0 +1,35 @@
+name: Temporary public index reference checks
+on:
+  push:
+    branches: [tmp-ger40-data]
+    paths: ['.github/workflows/tmp-index-public-reference.yml']
+permissions:
+  contents: read
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install requests numpy pandas
+      - name: Public reference requests only
+        run: |
+          python -u - <<'PY'
+          import pathlib,json
+          src=pathlib.Path('tmp-lse/validate_download.py').read_text()
+          src=src.split("usage=request(BASE+'/usage'")[0]
+          src=src.replace('from lse_auth3 import read_repo','').replace("KEY=os.environ['LSE_API_KEY']","KEY=''")
+          context={'__name__':'__main__'}
+          exec(compile(src,'public_reference.py','exec'),context)
+          pathlib.Path('validation-data/reference_request_audit.json').write_text(json.dumps(context['logs'],indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: index-independent-public-reference
+          path: validation-data
+          retention-days: 1
+          compression-level: 0
